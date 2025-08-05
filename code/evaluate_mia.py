@@ -7,9 +7,6 @@ import json
 
 
 def get_confidences(model, dataset, idxs, device):
-    """
-    모델이 주어진 데이터셋의 특정 인덱스들에 대해 예측하는 확신도를 추출
-    """
     model.eval()
     loader = DataLoader(Subset(dataset, idxs), batch_size=128, shuffle=False)
     confidences = []
@@ -25,81 +22,143 @@ def get_confidences(model, dataset, idxs, device):
     return confidences
 
 
+def evaluate_classification_accuracy(model, dataset, idxs, device, dataset_name=""):
+    """
+    특정 데이터셋 인덱스에 대한 분류 정확도 평가
+    """
+    model.eval()
+    model.to(device)
+    
+    if len(idxs) == 0:
+        print(f"[Warning] {dataset_name}: No data to evaluate")
+        return 0.0
+    
+    loader = DataLoader(Subset(dataset, idxs), batch_size=128, shuffle=False)
+    correct = 0
+    total = 0
+    
+    with torch.no_grad():
+        for x, y in loader:
+            x, y = x.to(device), y.to(device)
+            outputs = model(x)
+            predicted = outputs.argmax(dim=1)
+            total += y.size(0)
+            correct += (predicted == y).sum().item()
+    
+    accuracy = correct / total if total > 0 else 0.0
+    print(f"[Classification] {dataset_name} Accuracy: {accuracy*100:.2f}% ({correct}/{total})")
+    return accuracy
+
+
+def evaluate_synthetic_classification_accuracy(model, synthetic_dataset, device, dataset_name="Synthetic"):
+    """
+    생성된 합성 데이터셋에 대한 분류 정확도 평가
+    """
+    model.eval()
+    model.to(device)
+    
+    if len(synthetic_dataset) == 0:
+        print(f"[Warning] {dataset_name}: No synthetic data to evaluate")
+        return 0.0
+    
+    loader = DataLoader(synthetic_dataset, batch_size=128, shuffle=False)
+    correct = 0
+    total = 0
+    
+    with torch.no_grad():
+        for x, y in loader:
+            x, y = x.to(device), y.to(device)
+            outputs = model(x)
+            predicted = outputs.argmax(dim=1)
+            total += y.size(0)
+            correct += (predicted == y).sum().item()
+    
+    accuracy = correct / total if total > 0 else 0.0
+    print(f"[Classification] {dataset_name} Accuracy: {accuracy*100:.2f}% ({correct}/{total})")
+    return accuracy
+
+
+def comprehensive_evaluation(model, train_dataset, test_dataset, forget_idxs, retain_idxs, 
+                           synthetic_dataset, device, save_path=None):
+    """
+    종합적인 분류 성능 평가
+    """
+    print("\n========== Classification Performance Evaluation ==========")
+    
+    # 1. 전체 원본 테스트 데이터에 대한 정확도
+    all_test_idxs = list(range(len(test_dataset)))
+    test_acc = evaluate_classification_accuracy(model, test_dataset, all_test_idxs, device, "Original Test Set")
+    
+    # 2. Retain set에 대한 정확도
+    retain_acc = evaluate_classification_accuracy(model, train_dataset, retain_idxs, device, "Retain Set")
+    
+    # 3. Forget set에 대한 정확도
+    forget_acc = evaluate_classification_accuracy(model, train_dataset, forget_idxs, device, "Forget Set")
+    
+    # 4. 생성된 합성 데이터에 대한 정확도
+    synthetic_acc = 0.0
+    if synthetic_dataset is not None:
+        synthetic_acc = evaluate_synthetic_classification_accuracy(model, synthetic_dataset, device, "Generated Synthetic Data")
+    else:
+        print("[Classification] Generated Synthetic Data: No synthetic data available")
+    
+    print("===========================================================\n")
+    
+    # 결과 저장
+    results = {
+        'original_test_accuracy': float(test_acc),
+        'retain_set_accuracy': float(retain_acc),
+        'forget_set_accuracy': float(forget_acc),
+        'synthetic_data_accuracy': float(synthetic_acc),
+        'n_retain': len(retain_idxs),
+        'n_forget': len(forget_idxs),
+        'n_synthetic': len(synthetic_dataset) if synthetic_dataset else 0
+    }
+    
+    if save_path:
+        with open(save_path, 'w') as f:
+            json.dump(results, f, indent=4)
+    
+    return results
+
+
 def evaluate_mia(model, dataset, test_dataset, forget_idxs, retain_idxs, shadow_idxs, device, save_path=None):
-    """
-    Membership Inference Attack을 통해 unlearning 효과 평가
-    
-    Args:
-        model: 평가할 모델
-        dataset: 원본 훈련 데이터셋
-        test_dataset: 테스트 데이터셋
-        forget_idxs: 제거하려는 데이터 인덱스들
-        retain_idxs: 유지하는 데이터 인덱스들 (test_dataset에서)
-        shadow_idxs: Shadow model 훈련용 인덱스들 (확실히 member인 데이터)
-        device: 디바이스
-        save_path: 결과 저장 경로
-    
-    Returns:
-        MIA 결과 딕셔너리 (AUC 포함)
-    """
-    
-    # 1. Shadow 모델 훈련용 confidence 수집
-    print("[MIA] Collecting shadow confidences...")
-    conf_retain = get_confidences(model, dataset, shadow_idxs, device)  # Member (확실히 훈련됨)
-    conf_forget = get_confidences(model, dataset, forget_idxs, device)  # Target (제거하려는 데이터)
+    # 1. shadow 모델 훈련용 confidence 수집
+    conf_retain = get_confidences(model, dataset, shadow_idxs, device)
+    conf_forget = get_confidences(model, dataset, forget_idxs, device)
 
-    print(f"[MIA] Shadow retain confidence mean: {np.mean(conf_retain):.4f}")
-    print(f"[MIA] Shadow forget confidence mean: {np.mean(conf_forget):.4f}")
+    print("retain confidence mean:", np.mean(conf_retain))
+    print("forget confidence mean:", np.mean(conf_forget))
 
-    # Shadow 데이터로 공격 모델 훈련
     X_shadow = np.array(conf_retain + conf_forget).reshape(-1, 1)
-    y_shadow = np.array([1] * len(conf_retain) + [0] * len(conf_forget))  # 1: member, 0: non-member
+    y_shadow = np.array([0] * len(conf_retain) + [1] * len(conf_forget))
 
-    # 2. 공격 모델 학습 (Logistic Regression)
-    print("[MIA] Training attack model...")
-    clf = LogisticRegression(solver='liblinear', random_state=42)
+    # 2. 공격 모델 학습
+    clf = LogisticRegression(solver='liblinear')
     clf.fit(X_shadow, y_shadow)
 
     # 3. 평가 대상 confidence 수집
-    print("[MIA] Collecting evaluation confidences...")
-    # Test dataset의 retain 데이터 (확실히 non-member)
-    eval_conf_retain = get_confidences(model, test_dataset, retain_idxs, device)  # Non-member
-    # 원본 dataset의 forget 데이터 (unlearning 타겟)
-    eval_conf_forget = get_confidences(model, dataset, forget_idxs, device)      # Target
+    eval_conf_retain = get_confidences(model, test_dataset, retain_idxs, device)
+    eval_conf_forget = get_confidences(model, dataset, forget_idxs, device)
+    print("evalu retain confidence mean:", np.mean(eval_conf_retain))
+    print("evalu forget confidence mean:", np.mean(eval_conf_forget))
 
-    print(f"[MIA] Eval retain confidence mean: {np.mean(eval_conf_retain):.4f}")
-    print(f"[MIA] Eval forget confidence mean: {np.mean(eval_conf_forget):.4f}")
-
-    # 평가 데이터 준비
     X_eval = np.array(eval_conf_retain + eval_conf_forget).reshape(-1, 1)
-    y_eval = np.array([0] * len(eval_conf_retain) + [1] * len(eval_conf_forget))  # 0: non-member, 1: member
+    y_eval = np.array([0] * len(eval_conf_retain) + [1] * len(eval_conf_forget))
 
     # 4. AUC 계산
-    print("[MIA] Computing AUC...")
-    pred_probs = clf.predict_proba(X_eval)[:, 1]  # member일 확률
+    pred_probs = clf.predict_proba(X_eval)[:, 1]
     auc = roc_auc_score(y_eval, pred_probs)
 
-    # 결과 정리
     result = {
         'auc': float(auc),
         'n_forget': len(forget_idxs),
         'n_retain': len(retain_idxs),
-        'n_shadow': len(shadow_idxs),
-        'shadow_retain_conf_mean': float(np.mean(conf_retain)),
-        'shadow_forget_conf_mean': float(np.mean(conf_forget)),
-        'eval_retain_conf_mean': float(np.mean(eval_conf_retain)),
-        'eval_forget_conf_mean': float(np.mean(eval_conf_forget)),
-        'interpretation': {
-            'auc_meaning': 'Lower AUC indicates better unlearning (harder to distinguish forget data)',
-            'perfect_unlearning_auc': 0.5,
-            'current_status': 'excellent' if auc < 0.6 else 'good' if auc < 0.7 else 'needs_improvement'
-        }
+        'n_shadow': len(shadow_idxs)
     }
 
-    # 결과 저장
     if save_path:
         with open(save_path, 'w') as f:
             json.dump(result, f, indent=4)
-        print(f"[MIA] Results saved to {save_path}")
 
     return result
