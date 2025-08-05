@@ -3,9 +3,11 @@ import copy
 import numpy as np
 from torchvision import datasets, transforms
 from torch.utils.data import Dataset, Subset
-from torch.utils.data import random_split
-import random
 
+from torch.utils.data import random_split #안 본 데이터 만들기.
+#----백도어----
+from torch.utils.data import Dataset
+import random
 
 class CustomDataset(Dataset):
     def __init__(self, data):
@@ -22,42 +24,30 @@ class CustomDataset(Dataset):
         return self.data[idx]
 
     
-def add_backdoor_trigger(x, dataset_type='cifar'):
-    """데이터셋 타입에 따른 백도어 트리거 추가"""
+def add_backdoor_trigger(x):
     x_bd = x.clone()
-    
-    if dataset_type == 'cifar':
-        # CIFAR-10: 32x32, 3채널
-        x_bd[:, 29:32, 29:32] = 1.0
-    elif dataset_type == 'mnist':
-        # MNIST: 28x28, 1채널
-        x_bd[:, 25:28, 25:28] = 0.9
-    
+    # 채널이 1개일 때, 이미지 마지막 부분에 2x2 크기의 밝은 점 추가
+    x_bd[:, 25:28, 25:28] = 0.9
     return x_bd
 
 
 def create_poisoned_dataset(train_dataset, user_groups, args, malicious_client=0, target_label=6, poison_ratio=0.1):
-    """데이터셋 타입을 자동 감지하여 백도어 생성"""
+    # 1. 악성 클라이언트 인덱스 중 일부만 백도어로 선택
     malicious_idxs = user_groups[malicious_client]
     num_poison = int(len(malicious_idxs) * poison_ratio)
-    poisoned_idxs = set(random.sample(list(malicious_idxs), num_poison))
+    poisoned_idxs = set(random.sample(malicious_idxs, num_poison))  # 순서 상관없음, lookup 빠름
 
     full_data = []
-    
-    # 데이터셋 타입 자동 감지
-    sample_image, _ = train_dataset[0]
-    dataset_type = 'cifar' if sample_image.shape[0] == 3 else 'mnist'
-    
+
     for i in range(len(train_dataset)):
         x, y = train_dataset[i]
         if i in poisoned_idxs:
-            x = add_backdoor_trigger(x, dataset_type)
+            x = add_backdoor_trigger(x)
             y = target_label
         full_data.append((x, y))
 
     full_dataset = CustomDataset(full_data)
     return full_dataset, user_groups
-
 
 # -------------------- 데이터셋 로딩 --------------------
 def get_dataset(args):
@@ -71,58 +61,97 @@ def get_dataset(args):
         train_dataset, unseen_dataset = random_split(train_dataset, [55000, 5000])
 
     elif args.dataset == 'cifar':
-        transform = transforms.Compose([
+        train_transform = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465),
                                  (0.2023, 0.1994, 0.2010))
         ])
-        train_dataset = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=transform)
-        test_dataset = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=transform)
-        
-        # CIFAR-10에도 unseen_dataset 추가 (50000 → 45000 + 5000)
-        train_dataset, unseen_dataset = random_split(train_dataset, [45000, 5000])
 
+        test_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465),
+                                 (0.2023, 0.1994, 0.2010))
+        ])
+        train_dataset = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=train_transform)
+        test_dataset = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=test_transform)
+        train_dataset, unseen_dataset = random_split(train_dataset, [45000, 5000]) #50,000개의 학습데이터, 10,000개의 검증 데이터
     else:
         raise ValueError(f"Unsupported dataset: {args.dataset}")
 
     user_groups = partition_data(train_dataset, args)
-    return train_dataset, test_dataset, unseen_dataset, user_groups
+    return train_dataset, test_dataset,unseen_dataset, user_groups
 
+def get_targets_from_dataset(dataset):
+    # 일반 Dataset이면 .targets 바로 반환
+    if hasattr(dataset, 'targets'):
+        targets = dataset.targets
+    # Subset일 경우, 원본 데이터셋과 인덱스를 통해 targets 뽑기
+    elif isinstance(dataset, torch.utils.data.Subset):
+        targets = np.array(dataset.dataset.targets)[dataset.indices]
+    else:
+        raise AttributeError("Dataset type not supported for getting targets")
+    
+    # Tensor라면 numpy 변환 (필요시 .cpu()도)
+    if isinstance(targets, torch.Tensor):
+        targets = targets.cpu().numpy()
+    return targets
 
 # -------------------- 데이터셋 분할 --------------------
 def partition_data(dataset, args):
-    num_items = int(len(dataset) / args.num_users)
+    num_items = len(dataset) // args.num_users
     user_groups = {}
 
+    labels = get_targets_from_dataset(dataset)
+
     if args.iid:
+        np.random.seed(42) # 고정
         idxs = np.random.permutation(len(dataset))
         for i in range(args.num_users):
             user_groups[i] = idxs[i * num_items:(i + 1) * num_items].tolist()
+        return user_groups
     else:
-        # Non-IID 분할
-        if hasattr(dataset, 'targets'):
-            labels = dataset.targets.numpy() if torch.is_tensor(dataset.targets) else np.array(dataset.targets)
+        if getattr(args, 'dirichlet', False):
+            return partition_data_dirichlet(dataset, args.num_users, alpha=args.alpha, num_classes=args.num_classes)
         else:
-            # Subset인 경우 원본 데이터셋에서 라벨 추출
-            labels = []
-            for i in range(len(dataset)):
-                _, label = dataset[i]
-                labels.append(label)
-            labels = np.array(labels)
-            
-        idxs = np.argsort(labels)
-        shards_per_user = 2
-        num_shards = args.num_users * shards_per_user
-        shard_size = len(dataset) // num_shards
-        shards = [idxs[i * shard_size:(i + 1) * shard_size] for i in range(num_shards)]
+            idxs = np.argsort(labels)
+            shards_per_user = 2
+            num_shards = args.num_users * shards_per_user
+            shard_size = len(dataset) // num_shards
+            shards = [idxs[i * shard_size:(i + 1) * shard_size] for i in range(num_shards)]
 
-        user_groups = {i: [] for i in range(args.num_users)}
-        for i in range(args.num_users):
-            assigned_shards = shards[i * shards_per_user:(i + 1) * shards_per_user]
-            for shard in assigned_shards:
-                user_groups[i] += shard.tolist()
+            user_groups = {i: [] for i in range(args.num_users)}
+            for i in range(args.num_users):
+                assigned_shards = shards[i * shards_per_user:(i + 1) * shards_per_user]
+                for shard in assigned_shards:
+                    user_groups[i] += shard.tolist()
+            
+            return user_groups
+
+
+# -------------------- Dirichlet Non-IID Split --------------------
+def partition_data_dirichlet(dataset, num_users, alpha=0.5, num_classes=10):
+    try:
+        labels = np.array(dataset.targets)
+    except AttributeError:
+        labels = get_targets_from_dataset(dataset)
+
+    idxs = np.arange(len(dataset))
+    class_idxs = [idxs[labels == y] for y in range(num_classes)]
+    user_groups = {i: [] for i in range(num_users)}
+
+    for c in range(num_classes):
+        np.random.shuffle(class_idxs[c])
+        proportions = np.random.dirichlet(alpha=np.repeat(alpha, num_users))
+        proportions = (np.cumsum(proportions) * len(class_idxs[c])).astype(int)[:-1]
+        split_idxs = np.split(class_idxs[c], proportions)
+
+        for i, idx in enumerate(split_idxs):
+            user_groups[i] += idx.tolist()
 
     return user_groups
+
 
 
 # -------------------- 가중치 평균 --------------------
@@ -152,16 +181,36 @@ def exp_details(args):
 
 
 # -------------------- Synthetic Dataset 클래스 --------------------
+def get_transform(dataset_name):
+    if dataset_name == 'mnist':
+        return transforms.Normalize((0.1307,), (0.3081,))
+    elif dataset_name == 'cifar':
+        return transforms.Normalize((0.4914, 0.4822, 0.4465),
+                                    (0.2023, 0.1994, 0.2010))
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset_name}")
+
 class SyntheticImageDataset(Dataset):
-    def __init__(self, images, labels):
+    def __init__(self, images, labels, transform=None, device=None):
         self.images = images
         self.labels = labels
+        self.transform = transform
+        self.device = device
 
     def __len__(self):
         return len(self.images)
 
     def __getitem__(self, idx):
-        return self.images[idx], self.labels[idx]
+        img, label = self.images[idx], self.labels[idx]
+        if self.transform:
+            img = self.transform(img)
+        if self.device:
+            img = img.to(self.device)
+            if isinstance(label, torch.Tensor):
+                label = label.to(self.device)
+        return img, label
+
+
 
 
 # -------------------- Synthetic 데이터 IID 분배 --------------------
@@ -176,6 +225,6 @@ def partition_synthetic_data_iid(dataset, num_users):
     return user_groups
 
 
-# -------------------- Subset 추출 --------------------
+# —————————— Subset 추출 ——————————
 def get_synthetic_subset(dataset, user_groups, user_idx):
     return Subset(dataset, user_groups[user_idx])
