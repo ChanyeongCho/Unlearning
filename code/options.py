@@ -14,29 +14,25 @@ def args_parser():
     parser.add_argument('--momentum', type=float, default=0.75, help="SGD momentum")
 
     # 데이터셋 및 모델 선택
-    parser.add_argument('--dataset', type=str, default='cifar', 
-                       choices=['mnist', 'fmnist', 'cifar'], 
-                       help='Dataset name')
-    parser.add_argument('--model', type=str, default='resnet18', 
-                       choices=['cnn', 'mlp', 'resnet', 'resnet18'], 
-                       help='Model architecture')
+    parser.add_argument('--dataset', type=str, default='mnist', choices=['mnist', 'fmnist', 'cifar'], help='Dataset name')
+    parser.add_argument('--model', type=str, default='cnn', choices=['cnn', 'mlp', 'resnet'], help='Model architecture')
 
     # 기타 옵션
-    parser.add_argument('--iid', type=int, default=1, 
-                       help="IID or Non-IID data distribution (1 for IID, 0 for Non-IID)")
+    parser.add_argument('--iid', type=int, default=0, help="IID or Non-IID data distribution (1 for IID, 0 for Non-IID)")
     parser.add_argument('--gpu', type=int, default=0, help="GPU ID, set to -1 for CPU")
     parser.add_argument('--num_classes', type=int, default=10, help="Number of output classes")
 
     # 모델 학습 결과 저장 및 로드
     parser.add_argument('--load_model', type=str, default=None,
                     help="Path to a saved model to resume training from")
-    
-    # 데이터셋별 기본 저장 경로 설정
-    default_save_path = './saved_models/advanced_model.pth'
-    parser.add_argument('--save_model', type=str, default=default_save_path,
+    parser.add_argument('--save_model', type=str, default='./saved_models/noniid_cnn_mnist_model100.pth',
                     help="Path to save the trained model")
 
-    # Generator 관련 파라미터 (UNGAN용)
+    # Dirichlet distribution 관련 
+    parser.add_argument('--dirichlet', type=int, default=1, help="Use dirichlet distribution for Non-IID (1 for True, 0 for False)")
+    parser.add_argument('--alpha', type=float, default=0.5, help="Alpha parameter for dirichlet distribution")
+
+    # Generator 관련 파라미터 (필요 시)
     parser.add_argument('--z_dim', type=int, default=100, help="Dimension of noise vector for Generator")
     parser.add_argument('--gen_threshold', type=float, default=0.7, help="Discriminator filtering threshold")
     parser.add_argument('--num_gen_samples', type=int, default=128, help="Number of generated samples per client")
