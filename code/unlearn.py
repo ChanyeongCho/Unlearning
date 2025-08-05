@@ -37,7 +37,6 @@ def train_generator_ungan(generator, discriminator, dataset, retain_idxs, forget
     print("[UNGAN] Generator training completed.\n")
     return generator
 
-
 def train_gd_ungan(generator, discriminator, dataset, retain_idxs, forget_idxs, device,
                           lambda_adv=1.0, z_dim=100, batch_size=64, epochs=10):
     """
@@ -104,6 +103,87 @@ def train_gd_ungan(generator, discriminator, dataset, retain_idxs, forget_idxs, 
     print("[UNGAN] Generator and Discriminator training completed.\n")
     return generator, discriminator
 
+def train_gd_ungan_with_unseen(generator, discriminator, dataset, retain_idxs, forget_idxs, device,
+                   lambda_adv, z_dim, batch_size, epochs, unseen_dataset=None):
+    """
+    UNGAN Generator & Discriminator 학습
+    → Discriminator는 Unseen+Forget 데이터를 모두 Real로 학습
+    → Generator는 adversarial loss + (optional) unseen similarity loss 사용
+    """
+    g_optimizer = torch.optim.Adam(generator.parameters(), lr=1e-4)
+    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=1e-4)
+    criterion = nn.BCELoss()  # GAN용 이진 분류 손실
+
+    # Forget + Unseen 데이터 로더 구성
+    forget_subset = torch.utils.data.Subset(dataset, forget_idxs)
+
+    if unseen_dataset is not None:
+        real_dataset = torch.utils.data.ConcatDataset([forget_subset, unseen_dataset])
+    else:
+        real_dataset = forget_subset
+
+    real_loader = torch.utils.data.DataLoader(real_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+
+    print(f"[UNGAN] Training Generator and Discriminator for {epochs} epochs...")
+
+    generator.train()
+    discriminator.train()
+    if unseen_dataset is not None:
+        unseen_loader = torch.utils.data.DataLoader(unseen_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+        unseen_iter = iter(unseen_loader)
+    for epoch in range(epochs):
+        for real_imgs, _ in real_loader:
+            real_imgs = real_imgs.to(device)
+
+            # ---------------------
+            # 1. Discriminator 학습
+            # ---------------------
+            d_optimizer.zero_grad()
+
+            real_labels = torch.ones((real_imgs.size(0), 1), device=device)
+            fake_labels = torch.zeros((real_imgs.size(0), 1), device=device)
+
+            real_preds = discriminator(real_imgs)
+            d_loss_real = criterion(real_preds, real_labels)
+
+            z = torch.randn((real_imgs.size(0), z_dim), device=device)
+            fake_imgs = generator(z)
+
+            fake_preds = discriminator(fake_imgs.detach())
+            d_loss_fake = criterion(fake_preds, fake_labels)
+
+            d_loss = d_loss_real + d_loss_fake
+            d_loss.backward()
+            d_optimizer.step()
+
+            # ---------------------
+            # 2. Generator 학습
+            # ---------------------
+            g_optimizer.zero_grad()
+            fake_preds = discriminator(fake_imgs)
+            g_loss_adv = criterion(fake_preds, real_labels)
+
+            sim_loss = 0.0
+            if unseen_dataset is not None:
+                try:
+                    unseen_imgs, _ = next(unseen_iter)
+                except StopIteration:
+                    unseen_iter = iter(unseen_loader)
+                    unseen_imgs, _ = next(unseen_iter)
+
+                unseen_imgs = unseen_imgs.to(device)
+                min_len = min(fake_imgs.size(0), unseen_imgs.size(0))
+                sim_loss = F.mse_loss(fake_imgs[:min_len], unseen_imgs[:min_len])
+
+            g_loss = g_loss_adv + lambda_adv * sim_loss
+            g_loss.backward()
+            g_optimizer.step()
+
+        print(f"[UNGAN] Epoch {epoch+1}/{epochs} | D Loss: {d_loss.item():.4f} | G Loss: {g_loss.item():.4f} | Sim Loss: {sim_loss:.4f}")
+
+    print("[UNGAN] Generator and Discriminator training completed.\n")
+    return generator, discriminator
+
 
 # -------------------- Synthetic Dataset 정의 --------------------
 class SyntheticImageDataset(Dataset):
@@ -128,6 +208,52 @@ def partition_synthetic_data_iid(dataset, num_users):
         user_groups[i] = indices[i * num_items:(i + 1) * num_items].tolist()
 
     return user_groups
+
+
+# -------------------- Non-IID 분배 --------------------
+def partition_synthetic_data_dirichlet(dataset, num_users, alpha=0.5, num_classes=10):
+    """
+    Synthetic 데이터셋을 Dirichlet 분포 기반으로 Non-IID하게 분할
+
+    Args:
+        dataset: SyntheticImageDataset 
+        num_users: 사용자 수 (언러닝 클라이언트 제외, 즉 9명)
+        alpha: Dirichlet 분포의 집중도 (작을수록 편향 큼)
+        num_classes: 총 클래스 수
+
+    Returns:
+        user_groups: Dict[user_id] = list of sample indices
+    """
+    if isinstance(dataset.labels, torch.Tensor):
+        labels = dataset.labels.cpu().numpy()
+    else:
+        labels = np.array(dataset.labels)
+
+    user_groups = {i: [] for i in range(num_users)}
+    idxs = np.arange(len(dataset))
+
+    # 클래스별 인덱스 그룹화
+    class_indices = [idxs[labels == y] for y in range(num_classes)]
+
+    for c in range(num_classes):
+        np.random.shuffle(class_indices[c])
+        class_size = len(class_indices[c])
+
+        proportions = np.random.dirichlet(np.repeat(alpha, num_users))
+        proportions = np.array([
+            p * (len(user_groups[i]) < len(dataset) / num_users)
+            for i, p in enumerate(proportions)
+        ])
+        proportions = proportions / proportions.sum()
+        proportions = (np.cumsum(proportions) * class_size).astype(int)[:-1]
+
+        split = np.split(class_indices[c], proportions)
+        for i, idx in enumerate(split):
+            user_groups[i] += idx.tolist()
+
+    return user_groups
+
+
 
 
 # -------------------- Subset 추출 --------------------
