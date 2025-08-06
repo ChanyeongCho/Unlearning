@@ -61,27 +61,24 @@ def get_dataset(args):
         train_dataset, unseen_dataset = random_split(train_dataset, [55000, 5000])
 
     elif args.dataset == 'cifar':
-        train_transform = transforms.Compose([
-            transforms.RandomCrop(32, padding=4),
-            transforms.RandomHorizontalFlip(),
+        # ========== 🔧 모든 데이터셋을 DCGAN 전처리로 통일 ==========
+        dcgan_transform = transforms.Compose([
+            transforms.Resize(32),           # 32 → 64로 리사이즈
+            transforms.CenterCrop(32),       # 중앙 크롭
             transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465),
-                                 (0.2023, 0.1994, 0.2010))
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))  # DCGAN 표준 정규화
         ])
 
-        test_transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465),
-                                 (0.2023, 0.1994, 0.2010))
-        ])
-        train_dataset = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=train_transform)
-        test_dataset = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=test_transform)
-        train_dataset, unseen_dataset = random_split(train_dataset, [45000, 5000]) #50,000개의 학습데이터, 10,000개의 검증 데이터
+        #  테스트 데이터도 동일한 전처리 적용
+        train_dataset = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=dcgan_transform)
+        test_dataset = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=dcgan_transform)  # 수정!
+        train_dataset, unseen_dataset = random_split(train_dataset, [45000, 5000])
     else:
         raise ValueError(f"Unsupported dataset: {args.dataset}")
 
     user_groups = partition_data(train_dataset, args)
-    return train_dataset, test_dataset,unseen_dataset, user_groups
+    return train_dataset, test_dataset, unseen_dataset, user_groups
+
 
 def get_targets_from_dataset(dataset):
     # 일반 Dataset이면 .targets 바로 반환
@@ -190,10 +187,20 @@ def get_transform(dataset_name):
     else:
         raise ValueError(f"Unsupported dataset: {dataset_name}")
 
+
+
+# -------------------- Synthetic Dataset 정의 --------------------
 class SyntheticImageDataset(Dataset):
     def __init__(self, images, labels, transform=None, device=None):
         self.images = images
-        self.labels = labels
+        # 라벨을 텐서로 변환 (DataLoader 호환성)
+        if isinstance(labels, list):
+            self.labels = torch.tensor(labels, dtype=torch.long)
+        elif isinstance(labels, torch.Tensor):
+            self.labels = labels.long()
+        else:
+            self.labels = torch.tensor(labels, dtype=torch.long)
+            
         self.transform = transform
         self.device = device
 
@@ -201,7 +208,14 @@ class SyntheticImageDataset(Dataset):
         return len(self.images)
 
     def __getitem__(self, idx):
-        img, label = self.images[idx], self.labels[idx]
+        # 이미지와 라벨 모두 텐서로 반환
+        img = self.images[idx]
+        label = self.labels[idx]
+        
+        # 이미지가 텐서가 아니면 변환
+        if not isinstance(img, torch.Tensor):
+            img = torch.tensor(img, dtype=torch.float32)
+            
         if self.transform:
             img = self.transform(img)
         if self.device:
