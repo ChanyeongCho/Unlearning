@@ -163,18 +163,22 @@ def average_weights(w_list):
 
 # -------------------- 실험 설정 출력 --------------------
 def exp_details(args):
-    print("===== Experiment Settings =====")
+    print("\n" + "="*70)
+    print("                       EXPERIMENT SETTINGS")
+    print("="*70)
     print(f"Model           : {args.model}")
     print(f"Dataset         : {args.dataset}")
     print(f"Num Clients     : {args.num_users}")
     print(f"Fraction        : {args.frac}")
     print(f"IID             : {args.iid}")
+    print(f"dirichlet alpha : {args.alpha}")
+    print(f"Epoch           : {args.epochs}")
     print(f"Local Epochs    : {args.local_ep}")
     print(f"Batch Size      : {args.local_bs}")
     print(f"Learning Rate   : {args.lr}")
     print(f"Generator z_dim : {args.z_dim}")
     print(f"Disc. Threshold : {args.gen_threshold}")
-    print("===============================")
+    print("="*70)
 
 
 # -------------------- Synthetic Dataset 클래스 --------------------
@@ -224,6 +228,59 @@ class SyntheticImageDataset(Dataset):
                 label = label.to(self.device)
         return img, label
 
+
+def generate_fixed_threshold_data(generator, discriminator, forget_idxs, dataset, device, z_dim, 
+                                  target_count, fixed_threshold=0.3, batch_size=64):
+    """고정 임계값으로 목표 수량까지 계속 생성"""
+    from models import generate_images, filter_images
+    
+    print(f"[Generation] Target: {target_count} images with fixed threshold {fixed_threshold}")
+    
+    all_synthetic_images = []
+    all_synthetic_labels = []
+    generation_round = 0
+    total_generated = 0
+    total_passed = 0
+    
+    while len(all_synthetic_images) < target_count:
+        generation_round += 1
+        
+        synthetic_images, synthetic_labels = generate_images(
+            generator=generator,
+            idxs=forget_idxs,
+            dataset=dataset,
+            device=device,
+            z_dim=z_dim,
+            num_generate=batch_size
+        )
+        
+        total_generated += len(synthetic_images)
+        
+        filtered_images, filtered_labels = filter_images(
+            discriminator=discriminator,
+            images=synthetic_images,
+            labels=synthetic_labels,
+            threshold=fixed_threshold,
+            device=device
+        )
+        
+        if len(filtered_images) > 0:
+            remaining_slots = target_count - len(all_synthetic_images)
+            add_count = min(len(filtered_images), remaining_slots)
+            
+            all_synthetic_images.extend(filtered_images[:add_count])
+            all_synthetic_labels.extend(filtered_labels[:add_count])
+            total_passed += len(filtered_images)
+            
+            if generation_round % 10 == 0:
+                print(f"[Round {generation_round}] Total collected: {len(all_synthetic_images)}/{target_count}")
+        
+        if generation_round > 3000:
+            print(f"[Warning] Reached max rounds.")
+            break
+    
+    print(f"[Generation Complete] Final count: {len(all_synthetic_images)}")
+    return all_synthetic_images, all_synthetic_labels
 
 
 
