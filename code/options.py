@@ -37,6 +37,7 @@ def args_parser():
     parser.add_argument('--gen_threshold', type=float, default=0.7, help="Discriminator filtering threshold")
     parser.add_argument('--num_gen_samples', type=int, default=128, help="Number of generated samples per client")
 
+
     args = parser.parse_args()
     args.gpu = args.gpu >= 0
 
