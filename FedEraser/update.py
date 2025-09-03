@@ -76,9 +76,6 @@ class LocalUpdate:
         return updated_weights, sum(epoch_loss) / len(epoch_loss), delta_weights
 
     def synthetic_update_weights(self, model, global_round, synthetic_dataset):
-        """
-        합성 데이터로 언러닝 클라이언트 업데이트
-        """
         model.to(self.device)
         model.train()
         optimizer = optim.SGD(model.parameters(), lr=self.args.lr, momentum=self.args.momentum, weight_decay=1e-4)
@@ -208,13 +205,7 @@ def test_inference(args, model, test_dataset):
 
 
 def combine_weights_federa(global_weights, unlearn_delta, other_deltas, unlearn_weight=0.5):
-    """
-    FedEraser 스타일 가중치 조합
-    global_weights: 현재 글로벌 모델 가중치
-    unlearn_delta: 언러닝 클라이언트의 델타
-    other_deltas: 나머지 클라이언트들의 델타 리스트
-    unlearn_weight: 언러닝 클라이언트의 가중치
-    """
+
     combined_weights = copy.deepcopy(global_weights)
     
     # 나머지 클라이언트들의 평균 델타 계산
