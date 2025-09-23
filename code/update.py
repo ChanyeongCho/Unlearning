@@ -42,17 +42,25 @@ class LocalUpdate:
             epoch_loss.append(sum(batch_loss) / len(batch_loss))
 
         return model.state_dict(), sum(epoch_loss) / len(epoch_loss)
-    
-    def FedErase_update_weights(self, model, global_round):
+
+    def synthetic_update_weights(self, model, global_round, synthetic_dataset):
+        """
+        합성 데이터로 언러닝 클라이언트 업데이트
+        """
         model.to(self.device)
         model.train()
-        optimizer = optim.SGD(model.parameters(), lr=self.args.lr, momentum=self.args.momentum,weight_decay=1e-4)
-        original_weights = copy.deepcopy(model.state_dict())
+        optimizer = optim.SGD(model.parameters(), lr=self.args.lr, momentum=self.args.momentum, weight_decay=1e-4)
+        
+        # 합성 데이터셋으로 DataLoader 생성
+        synthetic_loader = DataLoader(synthetic_dataset, batch_size=self.args.local_bs, shuffle=True)
+        
         epoch_loss = []
-
+        
+        print(f"[Synthetic Update] Training with {len(synthetic_dataset)} synthetic samples")
+        
         for epoch in range(self.args.local_ep):
             batch_loss = []
-            for batch_idx, (images, labels) in enumerate(self.train_loader):
+            for batch_idx, (images, labels) in enumerate(synthetic_loader):
                 images, labels = images.to(self.device), labels.to(self.device)
 
                 optimizer.zero_grad()
@@ -63,17 +71,11 @@ class LocalUpdate:
 
                 batch_loss.append(loss.item())
             epoch_loss.append(sum(batch_loss) / len(batch_loss))
-        # final weights after local update
-        updated_weights = model.state_dict()
-
-        # FedEraser: compute delta = updated_weights - original_weights
-        delta_weights = {}
-        for key in updated_weights.keys():
-            delta_weights[key] = updated_weights[key] - original_weights[key]
-
-        # 반환: 모델 파라미터와 로컬 손실, 델타 파라미터
-        return updated_weights, sum(epoch_loss) / len(epoch_loss), delta_weights
-
+        
+        avg_loss = sum(epoch_loss) / len(epoch_loss)
+        print(f"[Synthetic Update] Completed with average loss: {avg_loss:.4f}")
+        
+        return model.state_dict(), avg_loss
 
     def inference(self, model):
         model.to(self.device)
