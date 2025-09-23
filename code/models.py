@@ -206,6 +206,7 @@ class Discriminator(nn.Module):
             # state size. 1 x 1 x 1
         )
 
+
     def forward(self, input):
         output = self.main(input)
         return output.view(-1, 1).squeeze(1)
