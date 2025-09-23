@@ -214,9 +214,9 @@ def train_gd_ungan(generator, discriminator, dataset, retain_idxs, forget_idxs, 
 
 
 def train_gd_ungan_with_unseen(generator, discriminator, dataset, retain_idxs, forget_idxs, device,
-                              lambda_adv=1.0, z_dim=100, batch_size=64, epochs=10, unseen_dataset=None, mixing_ratio=0.3):
+                              lambda_adv=1.0, z_dim=100, batch_size=64, epochs=10, unseen_dataset=None, mixing_ratio=0.5):
     """
-    🔄 수정된 분포 혼합: Forget 분포 특성 + Unseen 시각적 특성
+     수정된 분포 혼합: Forget 분포 특성 + Unseen 시각적 특성
     → "Unseen처럼 보이되 Forget 분포를 따름"
     """
     import torch
@@ -370,8 +370,8 @@ def train_gd_ungan_with_unseen(generator, discriminator, dataset, retain_idxs, f
             
             #  새로운 혼합 비율: 분포 70% + 스타일 30%
             # "Forget 분포를 어느 정도 따르고, Unseen처럼 보이게"
-            distribution_weight = mixing_ratio  # 0.7 (분포가 더 중요)
-            style_weight = 1 - mixing_ratio              # 0.3 (스타일은 보조)
+            distribution_weight = mixing_ratio  # 0.2 (분포가 더 중요)
+            style_weight = 1 - mixing_ratio              # 0.8 (스타일은 보조)
             
             errG_mixing = distribution_weight * distribution_loss + style_weight * style_loss
             
