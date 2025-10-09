@@ -140,24 +140,108 @@ def partition_data(dataset, args):
 
 
 def partition_data_dirichlet(dataset, num_users, alpha=0.5, num_classes=10):
+    """
+    디리끘레 분포를 사용하되 모든 클라이언트가 동일한 데이터 수를 갖도록 수정된 함수
+    """
     try:
         labels = np.array(dataset.targets)
     except AttributeError:
         labels = get_targets_from_dataset(dataset)
 
+    # 전체 데이터를 클라이언트 수로 나눈 몫 (각 클라이언트가 가져야 할 데이터 수)
+    samples_per_client = len(dataset) // num_users
+    
     idxs = np.arange(len(dataset))
     class_idxs = [idxs[labels == y] for y in range(num_classes)]
-    user_groups = {i: [] for i in range(num_users)}
-
+    
+    # 각 클래스별로 셔플
     for c in range(num_classes):
         np.random.shuffle(class_idxs[c])
-        proportions = np.random.dirichlet(alpha=np.repeat(alpha, num_users))
-        proportions = (np.cumsum(proportions) * len(class_idxs[c])).astype(int)[:-1]
-        split_idxs = np.split(class_idxs[c], proportions)
-
-        for i, idx in enumerate(split_idxs):
-            user_groups[i] += idx.tolist()
-
+    
+    user_groups = {i: [] for i in range(num_users)}
+    
+    # 각 클라이언트별로 디리끘레 분포에 따라 클래스 비율 결정
+    for user_id in range(num_users):
+        # 해당 클라이언트의 클래스별 비율을 디리끘레 분포로 샘플링
+        proportions = np.random.dirichlet(alpha=np.repeat(alpha, num_classes))
+        
+        # 비율에 따라 각 클래스에서 가져올 샘플 수 계산
+        class_counts = (proportions * samples_per_client).astype(int)
+        
+        # 반올림 오차로 인한 샘플 수 부족/초과 보정
+        diff = samples_per_client - class_counts.sum()
+        if diff > 0:
+            # 부족한 경우: 가장 큰 비율의 클래스에 추가
+            max_class = np.argmax(proportions)
+            class_counts[max_class] += diff
+        elif diff < 0:
+            # 초과한 경우: 가장 큰 비율의 클래스에서 감소
+            max_class = np.argmax(proportions)
+            class_counts[max_class] += diff  # diff가 음수이므로 감소됨
+        
+        # 각 클래스에서 해당 수만큼 샘플 할당
+        for c in range(num_classes):
+            if class_counts[c] > 0:
+                # 해당 클래스에서 아직 할당되지 않은 샘플들 중에서 선택
+                available_samples = [idx for idx in class_idxs[c] 
+                                   if not any(idx in user_groups[u] for u in range(user_id))]
+                
+                if len(available_samples) >= class_counts[c]:
+                    selected_samples = available_samples[:class_counts[c]]
+                else:
+                    # 사용 가능한 샘플이 부족한 경우, 다른 클래스에서 보충
+                    selected_samples = available_samples
+                    remaining_needed = class_counts[c] - len(available_samples)
+                    
+                    # 다른 클래스들에서 보충
+                    for other_c in range(num_classes):
+                        if other_c != c and remaining_needed > 0:
+                            other_available = [idx for idx in class_idxs[other_c] 
+                                             if not any(idx in user_groups[u] for u in range(user_id))]
+                            take_count = min(remaining_needed, len(other_available))
+                            selected_samples.extend(other_available[:take_count])
+                            remaining_needed -= take_count
+                
+                user_groups[user_id].extend(selected_samples)
+                
+                # 사용된 샘플들을 해당 클래스 리스트에서 제거
+                for idx in selected_samples:
+                    if idx in class_idxs[c]:
+                        class_idxs[c] = class_idxs[c][class_idxs[c] != idx]
+    
+    # 남은 샘플들을 순차적으로 배분 (만약 있다면)
+    remaining_samples = []
+    for c in range(num_classes):
+        remaining_samples.extend(class_idxs[c])
+    
+    if remaining_samples:
+        for i, idx in enumerate(remaining_samples):
+            user_id = i % num_users
+            user_groups[user_id].append(idx)
+    
+    # 각 클라이언트의 데이터 수가 동일한지 확인 및 조정
+    target_size = samples_per_client
+    for user_id in range(num_users):
+        current_size = len(user_groups[user_id])
+        if current_size > target_size:
+            # 초과한 경우: 무작위로 제거하고 다른 클라이언트에게 분배
+            excess = user_groups[user_id][target_size:]
+            user_groups[user_id] = user_groups[user_id][:target_size]
+            
+            # 초과분을 부족한 클라이언트들에게 분배
+            for excess_idx in excess:
+                for other_user in range(num_users):
+                    if len(user_groups[other_user]) < target_size:
+                        user_groups[other_user].append(excess_idx)
+                        break
+    
+    # 최종 검증 및 리포트
+    print(f"[Dirichlet Equal Partition] Target size per client: {target_size}")
+    for user_id in range(num_users):
+        actual_size = len(user_groups[user_id])
+        print(f"Client {user_id}: {actual_size} samples")
+    visualize_client_data_distribution(dataset, user_groups, num_classes=10)
+    
     return user_groups
 
 
@@ -298,3 +382,33 @@ def partition_synthetic_data_iid(dataset, num_users):
 
 def get_synthetic_subset(dataset, user_groups, user_idx):
     return Subset(dataset, user_groups[user_idx])
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+def visualize_client_data_distribution(dataset, user_groups, num_classes=10):
+    """
+    각 클라이언트별 데이터 라벨 분포를 시각화하는 함수
+    """
+    try:
+        labels = np.array(dataset.targets)
+    except AttributeError:
+        labels = np.array([dataset[i][1] for i in range(len(dataset))])
+    
+    num_users = len(user_groups)
+    fig, axes = plt.subplots(nrows=(num_users+1)//2, ncols=2, figsize=(12, 3*((num_users+1)//2)))
+    axes = axes.flatten()
+
+    for user_id, idxs in user_groups.items():
+        user_labels = labels[idxs]
+        counts = np.bincount(user_labels, minlength=num_classes)
+
+        axes[user_id].bar(np.arange(num_classes), counts)
+        axes[user_id].set_title(f"Client {user_id}")
+        axes[user_id].set_xticks(np.arange(num_classes))
+        axes[user_id].set_xlabel("Class")
+        axes[user_id].set_ylabel("Count")
+
+    plt.tight_layout()
+    plt.show()
