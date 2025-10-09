@@ -216,7 +216,7 @@ def main():
     global_weights = global_model.state_dict()
     train_loss, train_accuracy = [], []
 
-    forget_client = 0
+    forget_client = 7
     forget_idxs = user_groups[forget_client]
     retain_idxs = [i for i in range(len(train_dataset)) if i not in forget_idxs]
     test_idxs = np.random.choice(len(test_dataset), len(forget_idxs), replace=False)
@@ -573,48 +573,48 @@ def main():
 
 
 
-    # ===================== 9. IID vs Non-IID 비교 (필요시) =====================
-    if not args.iid:
-        print("\n" + "-"*70)
-        print("IID vs NON-IID COMPARISON".center(70))
-        print("-"*70)
+    # # ===================== 9. IID vs Non-IID 비교 (필요시) =====================
+    # if not args.iid:
+    #     print("\n" + "-"*70)
+    #     print("IID vs NON-IID COMPARISON".center(70))
+    #     print("-"*70)
         
-        # IID 설정으로 한 번 더 실험
-        args_iid = copy.deepcopy(args)
-        args_iid.iid = 1
+    #     # IID 설정으로 한 번 더 실험
+    #     args_iid = copy.deepcopy(args)
+    #     args_iid.iid = 1
         
-        train_iid, test_iid, _, groups_iid = get_dataset(args_iid)
+    #     train_iid, test_iid, _, groups_iid = get_dataset(args_iid)
         
-        datasets_dict = {
-            'noniid': {
-                'train_dataset': full_dataset,
-                'test_dataset': test_dataset,
-                'forget_idxs': forget_idxs,
-                'retain_idxs': retain_idxs
-            },
-            'iid': {
-                'train_dataset': train_iid,
-                'test_dataset': test_iid,
-                'forget_idxs': groups_iid[forget_client],
-                'retain_idxs': [idx for i, group in groups_iid.items() 
-                               if i != forget_client for idx in group]
-            }
-        }
+    #     datasets_dict = {
+    #         'noniid': {
+    #             'train_dataset': full_dataset,
+    #             'test_dataset': test_dataset,
+    #             'forget_idxs': forget_idxs,
+    #             'retain_idxs': retain_idxs
+    #         },
+    #         'iid': {
+    #             'train_dataset': train_iid,
+    #             'test_dataset': test_iid,
+    #             'forget_idxs': groups_iid[forget_client],
+    #             'retain_idxs': [idx for i, group in groups_iid.items() 
+    #                            if i != forget_client for idx in group]
+    #         }
+    #     }
         
-        models_dict = {
-            'Original': original_model,
-            'Retrain': retrain_model,
-            'Finetune': finetune_model,
-            'Unlearn':unlearn_model
-        }
+    #     models_dict = {
+    #         'Original': original_model,
+    #         'Retrain': retrain_model,
+    #         'Finetune': finetune_model,
+    #         'Unlearn':unlearn_model
+    #     }
         
-        from evaluate_mia import evaluate_iid_vs_noniid
-        iid_comparison = evaluate_iid_vs_noniid(
-            models_dict=models_dict,
-            datasets_dict=datasets_dict,
-            device=device,
-            save_path='./results/iid_vs_noniid_comparison.json'
-        )
+    #     from evaluate_mia import evaluate_iid_vs_noniid
+    #     iid_comparison = evaluate_iid_vs_noniid(
+    #         models_dict=models_dict,
+    #         datasets_dict=datasets_dict,
+    #         device=device,
+    #         save_path='./results/iid_vs_noniid_comparison.json'
+    #     )
 
 
     # ===================== 10. MIA 평가 (기존 형식 유지) =====================
