@@ -7,10 +7,21 @@ code 폴더안에 있는 main을 실행하면, default 옵션에 맞춘 학습�
 "<img width="711" height="362" alt="스크린샷 2025-11-21 오전 4 04 26" src="https://github.com/user-attachments/assets/d7cb5c19-ff34-47a0-a1eb-6dfb21b764b6" />
 
 
-위 그림은 저희가 제시한 FedUnGAN의 전체 과정을 나타냅니다.
+위 그림은 저희가 제시한 FedUnGAN 기반 연합학습 언러닝의 전체 과정을 나타냅니다.본 연구에서는 데이터셋으로 타겟 클라이언트의 Forget 데이터, 그 외 클라이언트의 Retain 데이터와 서버의 Unseen 데이터로 일반적인 학습 과정에서 사용되지 않습니다. 서버는 특정 클라이언트가 언러닝을 요청할 경우, 타겟 클라이언트에게 Unseen 데이터를 전달하고 타겟 클라이언트는 Forget 데이터와 Unseen 데이터를 GAN을 통해 결합하여 Erasing 데이터를 생성합니다. 이후 생성된 Erasing 데이터를 활용하여 모델이 Forget 데이터의 영향을 점진적으로 제거하도록 하여 연합학습 환경에서의 언러닝을 수행합니다.
 
 
 <img width="679" height="353" alt="스크린샷 2025-11-21 오전 4 05 04" src="https://github.com/user-attachments/assets/91be432b-7b85-4033-b0c0-1134eef186e9" />
+
+위 그림은 Erasing 데이터의 생성 과정을 보여줍니다. GAN의 Discriminator의 손실함수는 생성된 데이터와 실제 데이터를 구별합니다. 본 연구에서 Erasing 데이터를 생성하는 GAN의 Generator와 Discriminator의 손실함수를 아래와 같이 정의하였습니다.
+
+<img width="314" height="118" alt="스크린샷 2025-11-21 오전 4 15 31" src="https://github.com/user-attachments/assets/dad48d0f-519a-4979-922c-5de5352cb67a" />
+
+여기에서, 𝐿_𝐺 의 항에서 기존 GAN의 항과 함께 Forget 데이터와 Unseen 데이터를 활용하는 항으로 𝐿_𝑑𝑖𝑠𝑡 와 𝐿_𝑠𝑡𝑦𝑙𝑒 을 추가하였습니다. 𝜆_𝑎𝑑𝑣를 이용하여 생성 노이즈 벡터와 𝐿_𝑑𝑖𝑠𝑡 와 𝐿_𝑠𝑡𝑦𝑙𝑒 의 반영 비율을 조절합니다. 𝜔를 통해서 Forget 데이터와 Unseen 데이터의 특성 반영 비율을 조절하여 생성 시 Forget과 Unseen의 집중 도를 조절할 수 있습니다.
+
+<img width="302" height="101" alt="스크린샷 2025-11-21 오전 4 16 16" src="https://github.com/user-attachments/assets/9846672c-c59b-4984-be12-e1f9971dc685" />
+
+𝐿_𝑑𝑖𝑠𝑡 항은 생성 이미지가 Forget 데이터의 분포 통계 특성인 채널 별 평균과 표준 편차를 반영하도록 합니다. 𝐿𝑠𝑡𝑦𝑙𝑒항은 생성 이미지가Unseen 이미지의 시각적 특성을 따라 학습할 수 있도록 하는 항으로 학습에 사용하지 않은 데이터인 Unseen 데이터의 특성을 반영하도록 합니다. 이로써 Unseen 데이터셋의 정보를 이용해 모델이 새로운 형식의 학습 패턴을 습득하도록 하고, Forget 데이터의 통계적 특성을 반영하여Forget 데이터의 학습 내용을 덮어씌우도록 유도합니다.
+
 
 
 실행 흐름
