@@ -7,7 +7,7 @@ code 폴더안에 있는 main을 실행하면, default 옵션에 맞춘 학습�
 "<img width="711" height="362" alt="스크린샷 2025-11-21 오전 4 04 26" src="https://github.com/user-attachments/assets/d7cb5c19-ff34-47a0-a1eb-6dfb21b764b6" />
 " />
 
-<\br>
+
 
 <img width="679" height="353" alt="스크린샷 2025-11-21 오전 4 05 04" src="https://github.com/user-attachments/assets/91be432b-7b85-4033-b0c0-1134eef186e9" />
 
