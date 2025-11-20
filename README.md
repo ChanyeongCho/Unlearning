@@ -1,4 +1,4 @@
-# FedUnlearning
+# FedUnGAN
 졸업 프로젝트 2025
 
 code 폴더안에 있는 main을 실행하면, default 옵션에 맞춘 학습이 진행됩니다. (다양한 실험을 위해서 arguments를 직접 수정하여 실행할 수도 있습니다.)
