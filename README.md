@@ -6,8 +6,8 @@ code 폴더안에 있는 main을 실행하면, default 옵션에 맞춘 학습�
 
 "<img width="711" height="362" alt="스크린샷 2025-11-21 오전 4 04 26" src="https://github.com/user-attachments/assets/d7cb5c19-ff34-47a0-a1eb-6dfb21b764b6" />
 
-위 그림은 저희가 제시한 FedUnGAN의 전체 과정을 나타냅니다.
 
+위 그림은 저희가 제시한 FedUnGAN의 전체 과정을 나타냅니다.
 
 
 <img width="679" height="353" alt="스크린샷 2025-11-21 오전 4 05 04" src="https://github.com/user-attachments/assets/91be432b-7b85-4033-b0c0-1134eef186e9" />
@@ -56,42 +56,16 @@ RAM : 32 Gb/ OS : Window 10 Home
 Anaconda 활용 / Python 3.12.9 사용
 
 실험 설정 :
-Model : CNN 모델
-DataSet : MNIST
-IID하게 분리하며, Train / Test / Unseen을 11 : 2 : 1의 비율로 데이터셋 양이 정해졌습니다.
-(Train - 55,000 개 / Test - 10,000 개 / Train에서 뽑아서 Unseen - 5,000 개)
+Model : ResNet-18 모델
+DataSet : CIFAR-10
+Non-IID하게 분리하며, Train / Test / Unseen을 9 : 2 : 1의 비율로 데이터셋 양이 정해졌습니다.
+(Train - 45,000 개 / Test - 10,000 개 / Train에서 뽑아서 Unseen - 5,000 개)
 
 클라이언트 수 : 10명 (매 학습마다 전체 참여 - Frac=1)
 언러닝 요청 클라이언트는 1명, 첫 번 째 클라이언트 / 언러닝 클라이언트의 백도어 데이터 및 정상 데이터 비율 (8:2)
 
-연합학습 라운드 : 200
-로컬 에폭 : 10 / 배치 사이즈 : 64 / Optimizer : SGD
-언러닝 재학습은 10 Epochs
+연합학습 라운드 : 30
+로컬 에폭 : 10 / 배치 사이즈 : 64 
+언러닝 재학습은 15 Epochs에서 발생
 
-언러닝 이전
-[Test Accuract] : 99.24 % / Loss : 0.0360
-[MIA] :
-Evaluate Retain Confidence mean : 0.99791354
-Evaluate Forget Confidence mean : 0.99810106
-ACU : 0.6122
-[ASR] : 99.40 %
-
-언러닝 이후
-Test Accuracy : 99.06 % / Loss : 0.0322
-[MIA] :
-Evaluate Retain Confidence mean : 0.99680257
-Evaluate Forget Confidence mean : 0.9634214
-AUC : 0.7868
-[ASR] : 22.03 %
-언러닝 시간 : 7.05초
-
-재학습 (언러닝 클라이언트 제외하고 학습)
-Test Accuracy : 99.08%
-시간 : 1876.33초
-[MIA] :
-Evaluate Retain Confidence mean : 0.9978992
-Evaluate Forget Confidence mean : 0.9983963
-AUC : 0.5014
-[ASR] : 9.50 %
-
-재학습에서의 MIA 평가는 글로벌 모델이 Forget Dataset에 대해서 학습을 해야 평가가 가능한데, 재학습에서는 아예 없었기 때문에 MIA 평가로 비교하는 것은 부적합할 수 있습니다.(Forget Confidence Mean이 높은 이유)
+<img width="746" height="465" alt="스크린샷 2025-11-21 오전 4 11 19" src="https://github.com/user-attachments/assets/a81f3e5f-57ad-4da1-8172-1143fb844cca" />
